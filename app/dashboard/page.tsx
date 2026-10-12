@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LogOut, RefreshCw, Filter, AlertOctagon, Info, Settings2 } from "lucide-react";
+import { Database, History, LogOut, RefreshCw, Filter, AlertOctagon, Info, Settings2 } from "lucide-react";
 import DigestFeed from "@/components/DigestFeed";
 import TopAlertBanner from "@/components/TopAlertBanner";
 import RepoManagerModal from "@/components/RepoManagerModal";
@@ -15,6 +15,13 @@ const DIGEST_KEY = "sift:digest";
 // pre-rename keys, read once so existing users keep their tracked repos
 const LEGACY_REPOS_KEY = "release-radar:repos";
 const LEGACY_DIGEST_KEY = "release-radar:digest";
+
+interface DigestMeta {
+  id: string;
+  generatedAt: string;
+  itemsCount: number;
+  criticalCount: number;
+}
 
 type Filter = "all" | "urgent" | "routine";
 const FILTERS: { id: Filter; label: string }[] = [
@@ -33,17 +40,46 @@ export default function Home() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [category, setCategory] = useState<Category | "all">("all");
+  const [storage, setStorage] = useState<"supabase" | "local">("local");
+  const [history, setHistory] = useState<DigestMeta[]>([]);
+
+  async function loadHistory() {
+    try {
+      const res = await fetch("/api/digests");
+      const data = await res.json();
+      if (res.ok) setHistory(data.digests ?? []);
+    } catch {}
+  }
 
   useEffect(() => {
-    try {
-      const r = (localStorage.getItem(REPOS_KEY) ?? localStorage.getItem(LEGACY_REPOS_KEY));
-      if (r) setRepos(JSON.parse(r));
-      const d = (localStorage.getItem(DIGEST_KEY) ?? localStorage.getItem(LEGACY_DIGEST_KEY));
-      if (d) setDigest(JSON.parse(d));
-    } catch {
-      /* ignore corrupt storage */
-    }
-    setHydrated(true);
+    (async () => {
+      // Prefer the database when Supabase is configured; otherwise fall back to this browser's storage.
+      try {
+        const res = await fetch("/api/repos");
+        const data = await res.json();
+        if (res.ok && data.storage === "supabase" && Array.isArray(data.repos)) {
+          setStorage("supabase");
+          setRepos(data.repos);
+          const dres = await fetch("/api/digests?latest=1");
+          const ddata = await dres.json();
+          if (dres.ok && ddata.digest) setDigest(ddata.digest);
+          loadHistory();
+          setHydrated(true);
+          return;
+        }
+      } catch {
+        /* server storage unavailable: use local */
+      }
+      try {
+        const r = localStorage.getItem(REPOS_KEY) ?? localStorage.getItem(LEGACY_REPOS_KEY);
+        if (r) setRepos(JSON.parse(r));
+        const d = localStorage.getItem(DIGEST_KEY) ?? localStorage.getItem(LEGACY_DIGEST_KEY);
+        if (d) setDigest(JSON.parse(d));
+      } catch {
+        /* ignore corrupt storage */
+      }
+      setHydrated(true);
+    })();
   }, []);
 
   function updateRepos(next: string[]) {
@@ -51,6 +87,27 @@ export default function Home() {
     try {
       localStorage.setItem(REPOS_KEY, JSON.stringify(next));
     } catch {}
+    if (storage === "supabase") {
+      fetch("/api/repos", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repos: next }),
+      })
+        .then((r) => !r.ok && setError("Couldn't save your repository list to the database."))
+        .catch(() => setError("Couldn't save your repository list to the database."));
+    }
+  }
+
+  async function openPastDigest(id: string) {
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/digests?id=${encodeURIComponent(id)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Could not load that digest.");
+      setDigest(data.digest);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load that digest.");
+    }
   }
 
   async function signOut() {
@@ -74,6 +131,7 @@ export default function Home() {
       try {
         localStorage.setItem(DIGEST_KEY, JSON.stringify(data));
       } catch {}
+      if (data.id) loadHistory();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
@@ -188,9 +246,30 @@ export default function Home() {
                   </button>
                 ))}
               </div>
+              <div className="flex flex-wrap items-center gap-3">
+                {history.length > 1 && (
+                  <label className="flex items-center gap-1.5 text-xs text-zinc-500">
+                    <History size={12} />
+                    <select
+                      value={digest.id ?? ""}
+                      onChange={(e) => openPastDigest(e.target.value)}
+                      aria-label="Past digests"
+                      className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 outline-none focus:border-zinc-600"
+                    >
+                      {!history.some((h) => h.id === digest.id) && <option value="">Current</option>}
+                      {history.map((h) => (
+                        <option key={h.id} value={h.id}>
+                          {new Date(h.generatedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} · {h.itemsCount} releases
+                          {h.criticalCount > 0 ? ` · ${h.criticalCount} critical` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               <p className="text-xs text-zinc-500">
                 {items.length} releases · {digest.reposChecked} repos · updated {new Date(digest.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </p>
+              </div>
             </div>
 
             <div className="mb-5 flex flex-wrap items-center gap-2">
@@ -235,6 +314,9 @@ export default function Home() {
 
       <footer className="border-t border-zinc-800 py-6 text-center text-xs text-zinc-600">
         Sift · releases from GitHub, advisories from OSV.dev, summaries by Gemini Flash.
+        <span className="ml-2 inline-flex items-center gap-1 text-zinc-500">
+          <Database size={11} /> {storage === "supabase" ? "Synced to Supabase" : "Saved in this browser"}
+        </span>
       </footer>
 
       <RepoManagerModal

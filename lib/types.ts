@@ -39,6 +39,8 @@ export interface DigestItem {
 }
 
 export interface DigestResponse {
+  /** set when the digest is stored in Supabase */
+  id?: string;
   items: DigestItem[];
   generatedAt: string;
   reposChecked: number;

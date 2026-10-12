@@ -13,4 +13,4 @@ export function middleware(req: NextRequest) {
   return NextResponse.redirect(url);
 }
 
-export const config = { matcher: ["/dashboard/:path*", "/api/digest", "/api/github/:path*"] };
+export const config = { matcher: ["/dashboard/:path*", "/api/digest", "/api/github/:path*", "/api/repos", "/api/digests"] };

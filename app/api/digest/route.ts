@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { fetchRecentReleases, RateLimitError } from "@/lib/github";
 import { analyzeReleasesWithGemini } from "@/lib/gemini";
 import { enrichWithAdvisories } from "@/lib/osv";
+import { saveDigest } from "@/lib/store";
 import { isValidRepo } from "@/lib/validation";
 import type { DigestResponse, RawRelease } from "@/lib/types";
 
@@ -88,6 +89,14 @@ export async function POST(req: Request) {
       warnings,
       rateLimited,
     };
+    try {
+      const id = await saveDigest(payload);
+      if (id) payload.id = id;
+    } catch (err) {
+      // history is a bonus: never fail the digest because the database is down
+      console.error("[digest] could not save to Supabase:", err instanceof Error ? err.message : err);
+      payload.warnings.push("Digest generated, but could not be saved to history.");
+    }
     return NextResponse.json(payload);
   } catch (err) {
     console.error("[digest] unexpected error:", err);
