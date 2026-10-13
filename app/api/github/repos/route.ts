@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { DepsError, findDependencyRepos } from "@/lib/deps";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,12 +23,23 @@ interface GhRepo {
  */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const source = searchParams.get("source") === "watching" ? "subscriptions" : "starred";
+  const sourceParam = searchParams.get("source");
+  const source = sourceParam === "watching" ? "subscriptions" : "starred";
   const username = (searchParams.get("username") ?? "").trim();
   const token = process.env.GITHUB_TOKEN;
 
   if (username && !USERNAME_RE.test(username)) {
     return NextResponse.json({ error: "That doesn't look like a valid GitHub username." }, { status: 400 });
+  }
+  if (sourceParam === "dependencies") {
+    if (!username) return NextResponse.json({ error: "Enter your GitHub username to scan your repos' dependencies." }, { status: 400 });
+    try {
+      return NextResponse.json({ owner: username, source: "dependencies", repos: await findDependencyRepos(username) });
+    } catch (err) {
+      if (err instanceof DepsError) return NextResponse.json({ error: err.message }, { status: err.status });
+      console.error("[github/repos] deps failed:", err instanceof Error ? err.message : err);
+      return NextResponse.json({ error: "Could not scan dependencies. Try again." }, { status: 502 });
+    }
   }
   if (!username && !token) {
     return NextResponse.json(

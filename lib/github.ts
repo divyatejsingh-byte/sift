@@ -29,7 +29,15 @@ interface GitHubRelease {
  * Fetches releases (only — never commits, PRs, issues or discussions) published in the last `days` days.
  * Returns [] when the repo has no recent releases.
  */
-export async function fetchRecentReleases(owner: string, repo: string, days = 7): Promise<RawRelease[]> {
+export interface FetchOptions {
+  /** canary / beta / rc builds are noise in a weekly briefing, so they're excluded unless asked for */
+  includePrereleases?: boolean;
+  /** newest N releases per repo; keeps one busy repo from flooding the digest */
+  maxPerRepo?: number;
+}
+
+export async function fetchRecentReleases(owner: string, repo: string, days = 7, opts: FetchOptions = {}): Promise<RawRelease[]> {
+  const { includePrereleases = false, maxPerRepo = 5 } = opts;
   const slug = `${owner}/${repo}`;
   if (!isValidRepo(slug)) throw new RepoFetchError(400, `Invalid repository "${slug}"`);
 
@@ -57,7 +65,8 @@ export async function fetchRecentReleases(owner: string, repo: string, days = 7)
 
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
   return (data as GitHubRelease[])
-    .filter((r) => !r.draft && r.published_at && new Date(r.published_at).getTime() >= cutoff)
+    .filter((r) => !r.draft && (includePrereleases || !r.prerelease) && r.published_at && new Date(r.published_at).getTime() >= cutoff)
+    .slice(0, maxPerRepo)
     .map((r) => ({
       repo: slug,
       tagName: r.tag_name,

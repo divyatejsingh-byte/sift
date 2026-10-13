@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Database, History, LogOut, RefreshCw, Filter, AlertOctagon, Info, Settings2 } from "lucide-react";
+import { Database, FlaskConical, History, LogOut, RefreshCw, Filter, AlertOctagon, Info, Settings2 } from "lucide-react";
 import DigestFeed from "@/components/DigestFeed";
 import TopAlertBanner from "@/components/TopAlertBanner";
+import DigestCharts from "@/components/DigestCharts";
 import RepoManagerModal from "@/components/RepoManagerModal";
 import { CATEGORIES, categoryForRepo, type Category } from "@/lib/categories";
-import { DEFAULT_REPOS, type DigestResponse } from "@/lib/types";
+import { buildMockDigest } from "@/lib/mockData";
+import { DEFAULT_REPOS, type DigestResponse, type Urgency } from "@/lib/types";
 
 const REPOS_KEY = "sift:repos";
 const DIGEST_KEY = "sift:digest";
@@ -40,6 +42,8 @@ export default function Home() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [category, setCategory] = useState<Category | "all">("all");
+  const [mock, setMock] = useState(false);
+  const [focus, setFocus] = useState<Urgency | null>(null);
   const [storage, setStorage] = useState<"supabase" | "local">("local");
   const [history, setHistory] = useState<DigestMeta[]>([]);
 
@@ -117,6 +121,8 @@ export default function Home() {
   }
 
   async function generate() {
+    setMock(false);
+    setFocus(null);
     setLoading(true);
     setError(null);
     try {
@@ -139,13 +145,18 @@ export default function Home() {
     }
   }
 
-  const items = digest?.items ?? [];
+  // Mock mode swaps in sample data that exercises every feature; it is never saved anywhere.
+  const mockDigest = useMemo(() => (mock ? buildMockDigest() : null), [mock]);
+  const shown = mockDigest ?? digest;
+
+  const items = shown?.items ?? [];
   const visible = useMemo(
     () =>
       items
         .filter((i) => (category === "all" ? true : categoryForRepo(i.repo) === category))
+        .filter((i) => (focus ? i.urgency === focus : true))
         .filter((i) => (filter === "all" ? true : filter === "urgent" ? i.urgency !== "ROUTINE_UPDATE" : i.urgency === "ROUTINE_UPDATE")),
-    [items, filter, category],
+    [items, filter, category, focus],
   );
   const releaseCounts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -179,6 +190,19 @@ export default function Home() {
               <Settings2 size={14} /> Manage Repos ({repos.length} tracked)
             </button>
             <button
+              onClick={() => {
+                setMock((m) => !m);
+                setFocus(null);
+              }}
+              aria-pressed={mock}
+              title="Show every feature using sample data"
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+                mock ? "border-violet-500/50 bg-violet-500/15 text-violet-200" : "border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700 hover:text-zinc-50"
+              }`}
+            >
+              <FlaskConical size={14} /> Mock data{mock ? " · ON" : ""}
+            </button>
+            <button
               onClick={generate}
               disabled={loading || repos.length === 0}
               className="flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3.5 py-1.5 text-sm font-medium text-zinc-900 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
@@ -199,13 +223,26 @@ export default function Home() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-8">
+        {mock && (
+          <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 p-3 text-sm text-violet-200">
+            <span className="flex items-center gap-2">
+              <FlaskConical size={16} className="shrink-0" />
+              <span>
+                <strong className="font-semibold">Mock data.</strong> Every feature below is shown with sample releases, not your live digest. Nothing is saved.
+              </span>
+            </span>
+            <button onClick={() => setMock(false)} className="rounded-md border border-violet-400/40 px-2.5 py-1 text-xs hover:bg-violet-500/20">
+              Back to live data
+            </button>
+          </div>
+        )}
         {error && (
           <div role="alert" className="mb-4 flex items-start gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">
             <AlertOctagon size={16} className="mt-0.5 shrink-0" /> {error}
           </div>
         )}
-        {digest?.warnings.map((w) => {
-          const rl = digest.rateLimited && w.includes("rate limit");
+        {shown?.warnings.map((w) => {
+          const rl = shown.rateLimited && w.includes("rate limit");
           return (
             <div
               key={w}
@@ -219,7 +256,7 @@ export default function Home() {
           );
         })}
 
-        {!digest && hydrated && (
+        {!shown && hydrated && !mock && (
           <div className="rounded-xl border border-dashed border-zinc-800 px-6 py-16 text-center">
             <Filter size={28} className="mx-auto mb-3 text-zinc-600" />
             <p className="text-sm text-zinc-400">
@@ -228,7 +265,7 @@ export default function Home() {
           </div>
         )}
 
-        {digest && (
+        {shown && (
           <>
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
               <div role="tablist" className="inline-flex rounded-lg border border-zinc-800 bg-zinc-900 p-0.5">
@@ -247,16 +284,16 @@ export default function Home() {
                 ))}
               </div>
               <div className="flex flex-wrap items-center gap-3">
-                {history.length > 1 && (
+                {!mock && history.length > 1 && (
                   <label className="flex items-center gap-1.5 text-xs text-zinc-500">
                     <History size={12} />
                     <select
-                      value={digest.id ?? ""}
+                      value={shown.id ?? ""}
                       onChange={(e) => openPastDigest(e.target.value)}
                       aria-label="Past digests"
                       className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 outline-none focus:border-zinc-600"
                     >
-                      {!history.some((h) => h.id === digest.id) && <option value="">Current</option>}
+                      {!history.some((h) => h.id === shown.id) && <option value="">Current</option>}
                       {history.map((h) => (
                         <option key={h.id} value={h.id}>
                           {new Date(h.generatedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} · {h.itemsCount} releases
@@ -267,7 +304,7 @@ export default function Home() {
                   </label>
                 )}
               <p className="text-xs text-zinc-500">
-                {items.length} releases · {digest.reposChecked} repos · updated {new Date(digest.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                {items.length} releases · {shown.reposChecked} repos · updated {new Date(shown.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </p>
               </div>
             </div>
@@ -294,13 +331,14 @@ export default function Home() {
             </div>
 
             <TopAlertBanner items={items} />
-            <DigestFeed items={visible} totalItems={items.length} quietRepos={digest.reposQuiet} />
+            <DigestCharts items={items} focus={focus} onFocus={setFocus} />
+            <DigestFeed items={visible} totalItems={items.length} quietRepos={shown.reposQuiet} />
 
-            {digest.reposFailed.length > 0 && (
+            {shown.reposFailed.length > 0 && (
               <details className="mt-6 text-sm text-zinc-500">
-                <summary className="cursor-pointer transition-colors hover:text-zinc-300">{digest.reposFailed.length} repo(s) could not be fetched</summary>
+                <summary className="cursor-pointer transition-colors hover:text-zinc-300">{shown.reposFailed.length} repo(s) could not be fetched</summary>
                 <ul className="mt-2 space-y-1 pl-4">
-                  {digest.reposFailed.map((f) => (
+                  {shown.reposFailed.map((f) => (
                     <li key={f.repo}>
                       <span className="text-zinc-300">{f.repo}</span> — {f.reason}
                     </li>
@@ -325,7 +363,7 @@ export default function Home() {
         repos={repos}
         onChange={updateRepos}
         releaseCounts={releaseCounts}
-        hasDigest={!!digest}
+        hasDigest={!!shown}
       />
     </div>
   );

@@ -12,6 +12,9 @@ interface Candidate {
   stars: number;
 }
 
+type Source = "dependencies" | "starred" | "watching";
+const SOURCE_LABEL: Record<Source, string> = { dependencies: "My dependencies", starred: "Starred", watching: "Watching" };
+
 interface Props {
   tracked: string[];
   onAdd: (repos: string[]) => void;
@@ -21,7 +24,7 @@ const MAX_TRACKED = 50;
 
 export default function ImportFromGitHub({ tracked, onAdd }: Props) {
   const [username, setUsername] = useState("");
-  const [source, setSource] = useState<"starred" | "watching">("starred");
+  const [source, setSource] = useState<Source>("dependencies");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
@@ -37,7 +40,7 @@ export default function ImportFromGitHub({ tracked, onAdd }: Props) {
     [candidates, trackedLower, query],
   );
 
-  async function load(nextSource = source) {
+  async function load(nextSource: Source = source) {
     setLoading(true);
     setError(null);
     try {
@@ -79,7 +82,7 @@ export default function ImportFromGitHub({ tracked, onAdd }: Props) {
         <input
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          placeholder="GitHub username (blank = use server token)"
+          placeholder={source === "dependencies" ? "Your GitHub username" : "GitHub username (blank = use server token)"}
           aria-label="GitHub username"
           className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-600"
         />
@@ -92,16 +95,16 @@ export default function ImportFromGitHub({ tracked, onAdd }: Props) {
         </button>
       </div>
       <div className="inline-flex rounded-lg border border-zinc-800 bg-zinc-900 p-0.5 text-xs">
-        {(["starred", "watching"] as const).map((s) => (
+        {(["dependencies", "starred", "watching"] as const).map((s) => (
           <button
             key={s}
             onClick={() => {
               setSource(s);
               if (candidates) load(s);
             }}
-            className={`rounded-md px-3 py-1 capitalize transition-colors ${source === s ? "bg-zinc-700 text-zinc-50" : "text-zinc-400 hover:text-zinc-200"}`}
+            className={`rounded-md px-3 py-1 transition-colors ${source === s ? "bg-zinc-700 text-zinc-50" : "text-zinc-400 hover:text-zinc-200"}`}
           >
-            {s}
+            {SOURCE_LABEL[s]}
           </button>
         ))}
       </div>

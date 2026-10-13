@@ -3,7 +3,8 @@ import type { DigestItem, RawRelease, Urgency } from "./types";
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 const MAX_BODY_CHARS = 4000;
-const CHUNK_SIZE = 8;
+const CHUNK_SIZE = 5;
+const GEMINI_TIMEOUT_MS = 30000; // a slow model call degrades to raw excerpts instead of hanging the whole digest
 const URGENCIES: Urgency[] = ["CRITICAL_SECURITY", "BREAKING_CHANGE", "ROUTINE_UPDATE"];
 
 const SYSTEM_PROMPT = `You are a release-notes analyst writing a weekly digest for a senior fintech engineer.
@@ -92,6 +93,7 @@ async function analyzeChunk(ai: GoogleGenAI, chunk: RawRelease[]): Promise<Diges
         temperature: 0.1,
         responseMimeType: "application/json",
         responseSchema,
+        httpOptions: { timeout: GEMINI_TIMEOUT_MS },
       },
     });
     const parsed: unknown = JSON.parse(response.text ?? "");

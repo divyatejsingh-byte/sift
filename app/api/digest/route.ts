@@ -72,7 +72,11 @@ export async function POST(req: Request) {
       warnings.push("GEMINI_API_KEY is not set — showing raw release excerpts instead of AI summaries.");
     }
 
-    const items = await enrichWithAdvisories(await analyzeReleasesWithGemini(releases), releases);
+    const t0 = Date.now();
+    const analysed = await analyzeReleasesWithGemini(releases);
+    const t1 = Date.now();
+    const items = await enrichWithAdvisories(analysed, releases);
+    console.log(`[digest] ${repos.length} repos, ${releases.length} releases | gemini ${t1 - t0}ms, osv ${Date.now() - t1}ms`);
     if (process.env.GEMINI_API_KEY && items.some((i) => i.fallback)) {
       warnings.push("Some releases could not be summarised by Gemini; raw excerpts are shown for them.");
     }
